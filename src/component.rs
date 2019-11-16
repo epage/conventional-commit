@@ -1,9 +1,14 @@
 //! Conventional Commit components.
 
-use crate::{Error, ErrorKind};
+use std::convert::TryFrom;
 use std::fmt;
 use std::ops::Deref;
 use std::str::FromStr;
+
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+use crate::{Error, ErrorKind};
 
 /// A single footer.
 ///
@@ -66,6 +71,9 @@ impl<'a> SimpleFooter<'a> {
 
 /// The type of separator between the footer token and value.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "&str"))]
+#[cfg_attr(feature = "serde", serde(into = "&'static str"))]
 pub enum FooterSeparator {
     /// ": "
     ColonSpace,
@@ -77,15 +85,34 @@ pub enum FooterSeparator {
     __NonExhaustive,
 }
 
-impl Deref for FooterSeparator {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
+impl FooterSeparator {
+    /// The string representation of the footer.
+    pub fn as_str(&self) -> &'static str {
         match self {
             FooterSeparator::ColonSpace => ": ",
             FooterSeparator::SpacePound => " #",
             FooterSeparator::__NonExhaustive => unreachable!(),
         }
+    }
+}
+
+impl AsRef<str> for FooterSeparator {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Deref for FooterSeparator {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
+    }
+}
+
+impl Into<&'static str> for FooterSeparator {
+    fn into(self) -> &'static str {
+        self.as_str()
     }
 }
 
@@ -107,17 +134,30 @@ impl FromStr for FooterSeparator {
     }
 }
 
+impl<'s> TryFrom<&'s str> for FooterSeparator {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
 macro_rules! components {
 ($($ty:ident),+) => (
     $(
         /// A component of the conventional commit.
         #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-        pub struct $ty<'a>(&'a str);
+        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+        #[cfg_attr(feature = "serde", serde(transparent))]
+        pub struct $ty<'a> {
+            #[cfg_attr(feature = "serde", serde(borrow))]
+            value: &'a str
+        }
 
         impl<'a> $ty<'a> {
             /// Create a $ty
             pub fn new(value: &'a str) -> Self {
-                $ty(value)
+                Self { value }
             }
         }
 
@@ -125,19 +165,19 @@ macro_rules! components {
             type Target = str;
 
             fn deref(&self) -> &Self::Target {
-                &self.0
+                &self.value
             }
         }
 
         impl fmt::Display for $ty<'_> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.0.fmt(f)
+                self.value.fmt(f)
             }
         }
 
         impl<'a> From<&'a str> for $ty<'a> {
-            fn from(string: &'a str) -> Self {
-                Self(string)
+            fn from(value: &'a str) -> Self {
+                Self { value }
             }
         }
     )+
@@ -149,12 +189,14 @@ macro_rules! unicase_components {
         $(
             /// A component of the conventional commit.
             #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
-            pub struct $ty<'a>(unicase::UniCase<&'a str>);
+            pub struct $ty<'a> {
+                value: unicase::UniCase<&'a str>
+            }
 
             impl<'a> $ty<'a> {
                 /// Create a $ty
                 pub fn new(value: &'a str) -> Self {
-                    $ty(unicase::UniCase::new(value))
+                    Self { value: unicase::UniCase::new(value) }
                 }
             }
 
@@ -162,19 +204,19 @@ macro_rules! unicase_components {
                 type Target = str;
 
                 fn deref(&self) -> &Self::Target {
-                    &self.0.into_inner()
+                    &self.value.into_inner()
                 }
             }
 
             impl fmt::Display for $ty<'_> {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    self.0.fmt(f)
+                    self.value.fmt(f)
                 }
             }
 
             impl<'a> From<&'a str> for $ty<'a> {
-                fn from(string: &'a str) -> Self {
-                    Self(unicase::UniCase::new(string))
+                fn from(value: &'a str) -> Self {
+                    Self { value: unicase::UniCase::new(value) }
                 }
             }
         )+
